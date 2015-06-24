@@ -11,6 +11,15 @@ enum
   LOGIN_FAILURE
 };
 
+/*! Used to login.
+ *  Will request username and password to login.
+ *  password will be hidden from prompt view. 
+ *  @param account  account to use for login details
+ *  @param pixiv_id pixiv id to use. NULL for prompt*/
+int pixivtool_login_prompt ( struct pixivtool_account *account,
+                             const char               *pixiv_id );
+
+
 /*! Used to login to an account and get login data for using most features which
  *  require to be logged in.
  * @param  account  Address of a pixiv account object
@@ -25,4 +34,7 @@ int pixivtool_login ( struct pixivtool_account *account,
 /*! Used to logout of an account 
  * @param account Account to be logged out of */
 void pixivtool_logout ( struct pixivtool_account *account );
+
+
+
 

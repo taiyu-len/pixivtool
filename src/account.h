@@ -6,13 +6,8 @@
 #pragma once
 
 #include <curl/curl.h>
+#include "constants.h"
 
-//!Account and password maximum lengths
-enum
-{
-  PIXIV_ID_MAXLEN = 255,
-  PASSWORD_MAXLEN = 32
-};
 
 
 /*! Account structure object. Holds The current session for logged in account */
