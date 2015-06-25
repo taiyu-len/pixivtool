@@ -1,7 +1,19 @@
-/* illust.h */
+/*!@file illust.h
+ * illustration metadata. Store metadata for illustration, and download link
+ * for getting it.
+ * TODO fancier save options, formatted file names and whatnot.
+ * TODO right now it just saves as 12345_p0.png or whatever*/
 #pragma once
 #include "account.h"
 
+
+/*TODO change slist to this. better to keep track of a single object
+  TODO (slist|string) instead of 2 objects (slist)->(string)
+struct slist {
+  struct slist *next;
+  char         string[];
+};
+*/
 
 struct slist {
   struct slist *next;

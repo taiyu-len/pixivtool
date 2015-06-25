@@ -44,7 +44,6 @@ int  pixivtool_login_prompt( struct pixivtool_account *account,
     while((c = getchar()) != '\n' && c != EOF && i < PIXIV_ID_MAXLEN)
       pid[i++] = c;
     pid[i] = 0;
-    putchar('\n');
     pixiv_id = pid;
   }
   //Get terminal info

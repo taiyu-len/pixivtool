@@ -12,5 +12,6 @@ enum {
 /*!Safely perform whatever request curl has.
  * @param curl The request handle to be performed
  * @return SUCCESS or FAILURE */
+
 int common_curl_perform( CURL *curl );
 

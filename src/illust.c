@@ -1,6 +1,8 @@
 /* member_illust.c */
 #include "illust.h"
+#include "illust_parse.h"
 #include "curlcommon.h"
+#include "vector.h"
 #include "url.h"
 
 #include <curl/curl.h>
@@ -16,16 +18,6 @@
 #define MEMBER_MANGA_URL \
   "http://www.pixiv.net/member_illust.php?mode=manga_big&illust_id="
 
-struct strarray
-{
-  char *memory;
-  size_t size;
-};
-
-//CURLOPT_WRITEFUNCTION function used to fill illust with metadata
-//pixivtool_member_illust* is passed into userdata
-static size_t strwrite( char *ptr, size_t size, size_t nmemb, void *userdata);
-
 
 int pixivtool_illust_init( struct pixivtool_account *account,
                            struct pixivtool_illust  *illust,
@@ -35,11 +27,11 @@ int pixivtool_illust_init( struct pixivtool_account *account,
   CURL *curl = account->session;
 
   /* Holds downloaded data */
-  struct strarray sarray = { NULL, 0 };
+  struct vector vstring = { NULL, 0 };
 
   /* Clear and set Illustration data */
   memset(illust, 0, sizeof(*illust));
-  illust->id      = id;
+  illust->id = id;
 
   /* Return code */
   int retcode;
@@ -50,149 +42,56 @@ int pixivtool_illust_init( struct pixivtool_account *account,
   curl_easy_setopt(curl, CURLOPT_URL, url);
 
   /* Set function to handle downloaded data */
-  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, strwrite);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, vwrite);
 
   /* create string to be filled with loaded data */
-  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sarray);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA,    &vstring);
 
   /* Send request and get data */
   retcode = common_curl_perform(curl);
 
+  /* Check response code */
+  long response_code;
+  curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+  if(response_code != 200)
+    retcode = COMMON_FAILURE;
+
   /* Reset request */
   curl_easy_reset(curl);
 
-  //Process returned data
-  char  *string = sarray.memory, *end;
-  int    read, found;
-  struct slist *tag_ptr = NULL;
-
-#define PREFIX_DATE  "<ul class=\"meta\">"
-#define PREFIX_TITLE "<h1 class=\"title\">"
-#define SUFFIX_TITLE "</h1>"
-#define PREFIX_TAGUL  "<ul class=\"tags\">"
-#define SUFFIX_TAGUL  "</ul>"
-#define PREFIX_TAG   "class=\"text\">"
-#define SUFFIX_TAG   "</a>"
-#define SUFFIX_IMG   "class=\"original-image\">"
-
-#define CHECKFAIL(X) \
-  if(X) { \
-    printf("Failed processing @" __FILE__ ":__LINE__\n"); \
-    retcode = COMMON_FAILURE; \
-    goto end; \
-  }
-
-  /* Search for prefix string before %d年%d月%d日 */
-  string = strstr(string, PREFIX_DATE) + sizeof(PREFIX_DATE) - 1;
-  CHECKFAIL(string == NULL);
-
-  found  = sscanf(string, " <li> %d年%d月%d日 %d:%d </li> <li> %n",
-      &illust->dateTime.year, &illust->dateTime.month,
-      &illust->dateTime.day , &illust->dateTime.hour,
-      &illust->dateTime.min , &read);
-  string += read;
-  //If we dont match properly stop processing
-  CHECKFAIL(found < 5);
-
-  /* Get Number of images/ size of image */
-  if(sscanf(string," 複数枚投稿 %dP %n", &illust->number, &read) < 1)
+  if(retcode == COMMON_SUCCESS)
   {
-    //If single image mode
-    illust->number = 1;
-    sscanf(string," %d × %d %n",
-        &illust->size.width, &illust->size.height, &read);
+    //Process Data
+    int parse = pixivtool_illust_parse( illust, vstring.memory );
+    //In case of manga page we need to load it
+    if(parse == PARSE_MANGA)
+    {
+      //Clear vector
+      vclear(&vstring);
+      //using `page=%d' because pixiv sets the url to whatever %d is. and its
+      //easier to use as %d
+      sprintf(url, "%s%d&page=%%d", MEMBER_MANGA_URL, id);
+      curl_easy_setopt(curl, CURLOPT_URL, url);
+      /* Set writefunctions */
+      curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, vwrite);
+      curl_easy_setopt(curl, CURLOPT_WRITEDATA    ,&vstring);
+      /* Send request and get data */
+      retcode = common_curl_perform(curl);
+      /* Get response code */
+      curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+      if(response_code != 200)
+        retcode = COMMON_FAILURE;
+      /* Reset request */
+      curl_easy_reset(curl);
+      pixivtool_illust_manga( illust, vstring.memory );
+    }
+    else if(parse == PARSE_FAILURE)
+      retcode = COMMON_FAILURE;
+    vclear(&vstring);
   }
 
-  string += read;
-
-  /* Search for title */
-  string = strstr(string, PREFIX_TITLE) + sizeof(PREFIX_TITLE) - 1;
-  CHECKFAIL(string == NULL);
-  {
-    size_t title_len = strstr(string, SUFFIX_TITLE) - string;
-    illust->title = (char *)malloc(title_len + 1);
-    strncpy(illust->title, string, title_len);
-    illust->title[title_len] = '\0';
-  }
-
-  /* Search for tags */
-  /* Find bounds of <ul class="tags"> .. </ul> */
-  string    = strstr(string, PREFIX_TAGUL) + sizeof(PREFIX_TAGUL) - 1;
-  CHECKFAIL(string == NULL);
-  end       = strstr(string, SUFFIX_TAGUL);
-  CHECKFAIL(end   == NULL);
-  /* Go through each tag */
-  string    = strstr(string, PREFIX_TAG) + sizeof(PREFIX_TAG) - 1;
-  while(string < end && string)
-  {
-    //Find tag length
-    int tag_len = strstr(string, SUFFIX_TAG) - string;
-
-    //Set tag pointer to top of illustration tags
-    if(tag_ptr == NULL) tag_ptr = &illust->tags;
-    //Or create new tag
-    else tag_ptr = tag_ptr->next = (struct slist *)malloc(sizeof(*tag_ptr->next));
-
-    tag_ptr->next = NULL;
-    //Create string
-    tag_ptr->string = (char *)malloc(tag_len + 1);
-
-    //Copy tag
-    strncpy(tag_ptr->string, string, tag_len);
-    tag_ptr->string[tag_len] = '\0';
-
-    //Find next tag
-    string = strstr(string, PREFIX_TAG) + sizeof(PREFIX_TAG) - 1;
-  }
-  CHECKFAIL(string == NULL);
-
-  /* Search for the image/manga */
-  if(illust->number == 1)
-  {
-    //Find last part of image string
-    string = strstr(string, SUFFIX_IMG);
-    //Search backwards and look for the "" surrounding the image url
-    while(*--string != '"');
-    end = string;
-    while(*--string != '"');
-    string++;
-    size_t url_len = end - string;
-    illust->image = (char *)malloc(url_len+1);
-    sscanf (string,"%[^\"]", illust->image);
-  }
-  /* Load from manga_big page */
-  else
-  {
-    //using `page=%d' because pixiv sets the url to whatever %d is. and its
-    //easier to use as %d
-    sprintf(url, "%s%d&page=%%d", MEMBER_MANGA_URL, id);
-    curl_easy_setopt(curl, CURLOPT_URL, url);
-
-    /* Set function to handle downloaded data */
-    free(sarray.memory);
-    sarray.memory = NULL;
-    sarray.size   =  0;
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, strwrite);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA    , &sarray);
-
-    /* Send request and get data */
-    retcode = common_curl_perform(curl);
-
-    /* Reset request */
-    curl_easy_reset(curl);
-#define PREFIX_MANGA_IMG "<img"
-    /* Find page */
-    char *string = strstr(sarray.memory, PREFIX_MANGA_IMG), *end;
-    while(*string++ != '"');
-    end = string;
-    while(*++end != '"');
-    size_t url_len = end - string;
-    illust->image = (char *)malloc(url_len+1);
-    sscanf(string,"%[^\"]",illust->image);
-  }
-
-
-  //XXX test out what i extraced
+  //TODO test out what i extraced
+  //TODO put this somewhere else
   printf("\n======= DEBUG ========\n");
   printf("date: %d年%d月%d日 %d:%d\n",
       illust->dateTime.year, illust->dateTime.month,
@@ -201,18 +100,16 @@ int pixivtool_illust_init( struct pixivtool_account *account,
   printf("size: %dx%d\n",illust->size.width, illust->size.height);
   printf("Images:%d\n",illust->number);
   printf("Title:%s\n", illust->title);
+  printf("Comment:%s\n", illust->comment);
   printf("Tags: ");
-  tag_ptr = &illust->tags; found = 0;
+  struct slist *tag_ptr = &illust->tags;
+  int i = 0;
   while(tag_ptr) {
-    printf(" %d:%s |",found++, tag_ptr->string);
+    printf(" %d:%s |",i++, tag_ptr->string);
     tag_ptr = tag_ptr->next;
   }
-  printf("\nImage: %s\n",illust->image);
+  printf("\nImage: %s",illust->image);
   printf("\n======= DEBUG ========\n");
-
-end:
-
-  free(sarray.memory);
 
   /* Print if failure */
   if(retcode == COMMON_FAILURE)
@@ -220,6 +117,7 @@ end:
 
   return retcode;
 }
+
 
 int pixivtool_illust_dl( struct pixivtool_account *account,
                          struct pixivtool_illust  *illust )
@@ -327,6 +225,7 @@ int pixivtool_illust_dl( struct pixivtool_account *account,
   return retcode;
 }
 
+
 int pixivtool_illust_cleanup( struct pixivtool_illust  *illust )
 {
   assert(illust != NULL);
@@ -349,27 +248,7 @@ int pixivtool_illust_cleanup( struct pixivtool_illust  *illust )
 
   //Reset data
   memset(illust, 0, sizeof(*illust));
+  return 0;
 }
-
-
-
-static size_t strwrite(char *ptr, size_t size, size_t nmemb, void *userdata )
-{
-  size_t realsize = size * nmemb;
-
-  struct strarray *sarr = (struct strarray *)userdata;
-  sarr->memory = (char *)realloc(sarr->memory, sarr->size + realsize + 1);
-  if(sarr->memory == NULL)
-  {
-    fprintf(stderr,"out of memory\n");
-    return 0;
-  }
-  memcpy(sarr->memory + sarr->size, ptr, realsize);
-  sarr->size  += realsize;
-  sarr->memory[ sarr->size ] = 0;
-  printf("%ldbytes...\r",sarr->size);fflush(stdout);
-  return nmemb;
-}
-
 
 
