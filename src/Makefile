@@ -10,5 +10,5 @@ all: $(object)
 
 %.o:%.c %.h
 
-test: $(object)
+pixivtool: $(object)
 	$(CC) $(object) -o$@ $(CFLAGS)
