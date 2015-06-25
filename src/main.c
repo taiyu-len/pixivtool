@@ -1,18 +1,12 @@
 /* main.c */
 
-#include "account.h"
-#include "illust.h"
-#include "login.h"
-#include "debug.h"
-
-#include <stdio.h>
-#include <errno.h>
-#include <stdlib.h>
-#include <termios.h>
-#include <unistd.h>
+#include "main.h"
 
 int main(int argc, char **argv)
 {
+  curl_global_init(CURL_GLOBAL_ALL);
+  atexit(curl_global_cleanup);
+
   //TODO make this better
   if(argc == 1)
   {
