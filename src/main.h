@@ -1,7 +1,6 @@
 /* main.h */
 #pragma once
 
-#include "init.h"
 #include "account.h"
 #include "illust.h"
 #include "login.h"
